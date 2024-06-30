@@ -28,6 +28,8 @@ from paddlenlp.transformers.model_outputs import CausalLMOutputWithPast
 from .base_model import LlavaMetaForCausalLM, LlavaMetaModel
 from .configuration import LlavaConfig, LlavaQwenConfig
 
+ConcatSePMaskedLoss = None
+
 __all__ = [
     "LlavaLlamaModel",
     "LlavaLlamaForCausalLM",
