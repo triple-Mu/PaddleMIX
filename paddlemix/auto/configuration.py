@@ -92,6 +92,8 @@ class AutoConfigMIX(AutoConfig):
                 return cls
 
         model_name = architectures[0]
+        if model_name == "ChatGLMModel":
+            model_name = "VisualGLMForConditionalGeneration"
         model_class = import_module(f"paddlemix.models.{model_name}")
 
         assert inspect.isclass(model_class) and issubclass(
