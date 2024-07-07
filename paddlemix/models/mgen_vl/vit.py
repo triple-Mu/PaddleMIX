@@ -23,6 +23,10 @@ from paddlenlp.transformers.configuration_utils import PretrainedConfig
 from paddlemix.models.model_utils import MixPretrainedModel
 from paddlemix.utils.log import logger
 
+try:
+    from paddle.nn.functional import scaled_dot_product_attention
+except ImportError:
+    scaled_dot_product_attention = None
 
 def get_abs_pos(abs_pos, tgt_size):
     src_size = int(math.sqrt(abs_pos.shape[0]))
@@ -84,6 +88,21 @@ class VisualAttention(paddle.nn.Layer):
         query_layer, key_layer, value_layer = mixed_x_layer.split(
             new_tensor_shape[-1] // self.hidden_size_per_attention_head, axis=-1
         )
+
+        if scaled_dot_product_attention is not None:
+            tmp_output = scaled_dot_product_attention(
+                query_layer.transpose([1, 0, 2, 3]),
+                key_layer.transpose([1, 0, 2, 3]),
+                value_layer.transpose([1, 0, 2, 3]),
+                is_causal=False,
+                attn_mask=None,
+                training=False
+            )
+            tmp_output = tmp_output.transpose([1, 0, 2, 3]).flatten(2)
+
+            output = self.out_proj(tmp_output)
+            return output
+
 
         x = query_layer.reshape([sq, b * self.num_attention_heads_per_partition, self.hidden_size_per_attention_head])
         perm_3 = list(range(x.ndim))
@@ -293,6 +312,7 @@ class VisionTransformer(VisionTransformerPretrainedModel):
         self.transformer = TransformerBlock(
             config.width, config.layers, config.heads, config.mlp_ratio, act_layer=act_layer, norm_layer=norm_layer
         )
+        self.pos = None
 
     def forward(self, x: paddle.Tensor):
         x = x.astype(dtype=self.conv1.weight.dtype)
@@ -301,7 +321,9 @@ class VisionTransformer(VisionTransformerPretrainedModel):
 
         x = x.reshape([x.shape[0], x.shape[1], self.grid_size[0] * self.grid_size[1]])
         x = x.transpose(perm=[0, 2, 1])
-        x = x + get_abs_pos(self.positional_embedding, x.shape[1])
+        if self.pos is None:
+            self.pos = get_abs_pos(self.positional_embedding, x.shape[1])
+        x = x + self.pos
 
         x = self.ln_pre(x)
         x = x.transpose(perm=[1, 0, 2])

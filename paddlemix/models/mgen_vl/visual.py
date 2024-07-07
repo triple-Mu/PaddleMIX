@@ -26,6 +26,10 @@ from PIL import Image
 
 from .vit import VisionTransformer, VisionTransformerConfig, get_abs_pos
 
+try:
+    from paddle.nn.functional import scaled_dot_product_attention
+except ImportError:
+    scaled_dot_product_attention = None
 
 def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     """
@@ -169,7 +173,9 @@ class MultiHeadAttention(nn.Layer):
             )
         else:
             tensor = getattr(self, self._type_list[index])(tensor)
-        tensor = tensor.reshape([0, 0, self.num_heads, self.head_dim]).transpose([0, 2, 1, 3])
+        tensor = tensor.reshape([0, 0, self.num_heads, self.head_dim])
+        if scaled_dot_product_attention is None:
+            tensor = tensor.transpose([0, 2, 1, 3])
         return tensor
 
     def forward(self, query, key=None, value=None, attn_mask=None):
@@ -216,6 +222,19 @@ class MultiHeadAttention(nn.Layer):
         value = query if value is None else value
         # compute q ,k ,v
         q, k, v = (self.compute_qkv(t, i) for i, t in enumerate([query, key, value]))
+
+        if scaled_dot_product_attention is not None:
+            tmp_output = scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                is_causal=False,
+                attn_mask=None,
+                training=False
+            )
+            tmp_output = tmp_output.flatten(2)
+            output = self.out_proj(tmp_output)
+            return output
 
         # scale dot product attention
         product = paddle.matmul(x=q, y=k, transpose_y=True)
@@ -279,6 +298,7 @@ class Resampler(paddle.nn.Layer):
         self.ln_q = norm_layer(embed_dim)
         self.ln_kv = norm_layer(embed_dim)
         self.apply(self._init_weights)
+        self.pos = None
 
     def _init_weights(self, m):
         if isinstance(m, paddle.nn.Linear):
@@ -293,7 +313,9 @@ class Resampler(paddle.nn.Layer):
             init_Constant(m.weight)
 
     def forward(self, x, attn_mask=None):
-        pos_embed = get_abs_pos(self.pos_embed, x.shape[1])
+        if self.pos is None:
+            self.pos = get_abs_pos(self.pos_embed, x.shape[1])
+        pos_embed = self.pos
         x = self.kv_proj(x)
 
         x = self.ln_kv(x).transpose(perm=[1, 0, 2])
