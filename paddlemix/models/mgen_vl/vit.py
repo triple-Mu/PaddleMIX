@@ -90,15 +90,16 @@ class VisualAttention(paddle.nn.Layer):
         ]
         mixed_x_layer = mixed_x_layer.reshape(new_tensor_shape)
 
-        query_layer, key_layer, value_layer = mixed_x_layer.split(
-            new_tensor_shape[-1] // self.hidden_size_per_attention_head, axis=-1
-        )
-
         if variable_length_memory_efficient_attention is not None:
-            tmp_output =  variable_length_memory_efficient_attention(
-                query_layer.transpose([1, 2, 0, 3]),
-                key_layer.transpose([1, 2, 0, 3]),
-                value_layer.transpose([1, 2, 0, 3]),
+            print('in variable_length_memory_efficient_attention')
+            mixed_x_layer = mixed_x_layer.transpose([1, 2, 0, 3])
+            query_layer, key_layer, value_layer = mixed_x_layer.split(
+                new_tensor_shape[-1] // self.hidden_size_per_attention_head, axis=-1
+            )
+            tmp_output = variable_length_memory_efficient_attention(
+                query_layer,
+                key_layer,
+                value_layer,
                 paddle.to_tensor([[sq]], dtype='int32'),
                 paddle.to_tensor([[sq]], dtype='int32'),
                 mask=None,
@@ -109,6 +110,10 @@ class VisualAttention(paddle.nn.Layer):
             tmp_output = tmp_output.transpose([2, 0, 1, 3]).flatten(2)
             output = self.out_proj(tmp_output)
             return output
+
+        query_layer, key_layer, value_layer = mixed_x_layer.split(
+            new_tensor_shape[-1] // self.hidden_size_per_attention_head, axis=-1
+        )
 
         if scaled_dot_product_attention is not None:
             tmp_output = scaled_dot_product_attention(
