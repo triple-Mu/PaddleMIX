@@ -28,6 +28,11 @@ try:
 except ImportError:
     scaled_dot_product_attention = None
 
+try:
+    from paddle.incubate.nn.functional import variable_length_memory_efficient_attention
+except ImportError:
+    variable_length_memory_efficient_attention = None
+
 def get_abs_pos(abs_pos, tgt_size):
     src_size = int(math.sqrt(abs_pos.shape[0]))
     tgt_size = int(math.sqrt(tgt_size))
@@ -88,6 +93,22 @@ class VisualAttention(paddle.nn.Layer):
         query_layer, key_layer, value_layer = mixed_x_layer.split(
             new_tensor_shape[-1] // self.hidden_size_per_attention_head, axis=-1
         )
+
+        if variable_length_memory_efficient_attention is not None:
+            tmp_output =  variable_length_memory_efficient_attention(
+                query_layer.transpose([1, 2, 0, 3]),
+                key_layer.transpose([1, 2, 0, 3]),
+                value_layer.transpose([1, 2, 0, 3]),
+                paddle.to_tensor([[sq]], dtype='int32'),
+                paddle.to_tensor([[sq]], dtype='int32'),
+                mask=None,
+                scale=None,
+                causal=False,
+                pre_cache_length=0
+            )
+            tmp_output = tmp_output.transpose([2, 0, 1, 3]).flatten(2)
+            output = self.out_proj(tmp_output)
+            return output
 
         if scaled_dot_product_attention is not None:
             tmp_output = scaled_dot_product_attention(
